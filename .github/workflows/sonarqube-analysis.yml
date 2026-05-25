@@ -187,16 +187,17 @@ jobs:
           find coverage -name lcov.info | sort | head -40
 
       - name: Decide CI Sonar scan mode
+        id: decide-scan-mode
         run: |
           should_run='false'
           if [[ "${{ github.event_name }}" == 'workflow_dispatch' && "${{ inputs.run_ci_sonar_analysis }}" == 'true' ]]; then
             should_run='true'
           fi
-          echo "runCiSonarAnalysis=$should_run" >> "$GITHUB_ENV"
+          echo "run_ci_sonar_analysis=$should_run" >> "$GITHUB_OUTPUT"
 
       - name: SonarQube Scan (CI mode)
-        if: ${{ env.runCiSonarAnalysis == 'true' }}
-        uses: SonarSource/sonarqube-scan-action@v7
+        if: ${{ steps.decide-scan-mode.outputs.run_ci_sonar_analysis == 'true' }}
+        uses: SonarSource/sonarqube-scan-action@c7ee0f9df90b7aa20e8dcf9695dcfe2e7da5b4f2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
@@ -207,7 +208,7 @@ jobs:
             -Dsonar.typescript.lcov.reportPaths=coverage/**/lcov.info
 
       - name: CI scan skipped (Automatic Analysis mode)
-        if: ${{ env.runCiSonarAnalysis != 'true' }}
+        if: ${{ steps.decide-scan-mode.outputs.run_ci_sonar_analysis != 'true' }}
         run: |
           echo "Skipping Sonar CI scan (manual toggle is false)." >> $GITHUB_STEP_SUMMARY
           echo "Automatic Analysis mode can stay enabled in SonarCloud." >> $GITHUB_STEP_SUMMARY
