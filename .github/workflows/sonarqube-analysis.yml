@@ -186,6 +186,25 @@ jobs:
           test -f coverage/frontend-coverage-report/portal/lcov.info
           find coverage -name lcov.info | sort | head -40
 
+      - name: Normalize LCOV paths for monorepo sources
+        run: |
+          while IFS= read -r file; do
+            sed -i.bak 's|^SF:src/|SF:services/121-service/src/|g' "$file"
+            rm -f "$file.bak"
+          done < <(find coverage/unit-test-coverage-report -name lcov.info)
+
+          while IFS= read -r file; do
+            sed -i.bak 's|^SF:src/|SF:interfaces/portal/src/|g' "$file"
+            rm -f "$file.bak"
+          done < <(find coverage/frontend-coverage-report -name lcov.info)
+
+      - name: Debug normalized LCOV sample
+        run: |
+          echo "Backend LCOV sample:"
+          head -20 coverage/unit-test-coverage-report/unit/lcov.info | grep '^SF:' | head -5 || true
+          echo "Frontend LCOV sample:"
+          head -20 coverage/frontend-coverage-report/portal/lcov.info | grep '^SF:' | head -5 || true
+
       - name: SonarQube Scan (CI mode)
         if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_ci_sonar_analysis == 'true' }}
         uses: SonarSource/sonarqube-scan-action@c7ee0f9df90b7aa20e8dcf9695dcfe2e7da5b4f2
@@ -196,6 +215,7 @@ jobs:
           args: >
             -Dsonar.organization=${{ secrets.SONAR_ORGANIZATION }}
             -Dsonar.projectKey=${{ secrets.SONAR_PROJECT_KEY }}
+            -Dsonar.javascript.lcov.reportPaths=coverage/**/lcov.info
             -Dsonar.typescript.lcov.reportPaths=coverage/**/lcov.info
 
       - name: CI scan skipped (Automatic Analysis mode)
