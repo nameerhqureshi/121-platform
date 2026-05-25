@@ -36,10 +36,6 @@ jobs:
   sonarqube-analysis:
     runs-on: ubuntu-latest
 
-    strategy:
-      matrix:
-        node-version: [20.x]
-
     services:
       postgres:
         image: postgres:15
@@ -65,7 +61,7 @@ jobs:
       - name: Set up Node.js for Backend
         uses: actions/setup-node@v6
         with:
-          node-version: ${{ matrix.node-version }}
+          node-version-file: 'services/121-service/.node-version'
           cache: 'npm'
           cache-dependency-path: services/121-service/package-lock.json
 
@@ -98,7 +94,7 @@ jobs:
       - name: Set up Node.js for Frontend
         uses: actions/setup-node@v6
         with:
-          node-version: ${{ matrix.node-version }}
+          node-version-file: 'interfaces/portal/.node-version'
           cache: 'npm'
           cache-dependency-path: interfaces/portal/package-lock.json
 
@@ -114,7 +110,7 @@ jobs:
       - name: Set up Node.js for Mock Service
         uses: actions/setup-node@v6
         with:
-          node-version: ${{ matrix.node-version }}
+          node-version-file: 'services/mock-service/.node-version'
           cache: 'npm'
           cache-dependency-path: services/mock-service/package-lock.json
 
