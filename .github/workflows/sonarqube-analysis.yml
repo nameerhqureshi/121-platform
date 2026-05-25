@@ -8,6 +8,11 @@ name: 'SonarQube Cloud Analysis'
 
 on:
   workflow_dispatch:
+    inputs:
+      run_ci_sonar_analysis:
+        description: 'Run CI Sonar scan (set true only when Automatic Analysis is disabled in SonarCloud)'
+        required: false
+        default: 'false'
   merge_group:
     types: [checks_requested]
   pull_request:
@@ -25,7 +30,6 @@ permissions:
 env:
   backendPath: services/121-service
   frontendPath: interfaces/portal
-  runCiSonarAnalysis: 'false'
 
 jobs:
   path-filter:
@@ -182,6 +186,14 @@ jobs:
           test -f coverage/frontend-coverage-report/portal/lcov.info
           find coverage -name lcov.info | sort | head -40
 
+      - name: Decide CI Sonar scan mode
+        run: |
+          should_run='false'
+          if [[ "${{ github.event_name }}" == 'workflow_dispatch' && "${{ inputs.run_ci_sonar_analysis }}" == 'true' ]]; then
+            should_run='true'
+          fi
+          echo "runCiSonarAnalysis=$should_run" >> "$GITHUB_ENV"
+
       - name: SonarQube Scan (CI mode)
         if: ${{ env.runCiSonarAnalysis == 'true' }}
         uses: SonarSource/sonarqube-scan-action@v7
@@ -197,9 +209,9 @@ jobs:
       - name: CI scan skipped (Automatic Analysis mode)
         if: ${{ env.runCiSonarAnalysis != 'true' }}
         run: |
-          echo "Skipping Sonar CI scan because runCiSonarAnalysis is false." >> $GITHUB_STEP_SUMMARY
-          echo "If SonarCloud Automatic Analysis is enabled, keep this as-is." >> $GITHUB_STEP_SUMMARY
-          echo "If you want coverage in SonarCloud from CI, disable Automatic Analysis and set env.runCiSonarAnalysis to true in this workflow." >> $GITHUB_STEP_SUMMARY
+          echo "Skipping Sonar CI scan (manual toggle is false)." >> $GITHUB_STEP_SUMMARY
+          echo "Automatic Analysis mode can stay enabled in SonarCloud." >> $GITHUB_STEP_SUMMARY
+          echo "To import coverage via CI (docs approach), disable Automatic Analysis in SonarCloud and run this workflow manually with run_ci_sonar_analysis=true." >> $GITHUB_STEP_SUMMARY
 
       - name: Save combined coverage report
         if: always()
