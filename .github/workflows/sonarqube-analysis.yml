@@ -1,0 +1,218 @@
+# SonarQube Cloud Analysis Workflow
+# Analyzes code quality, security, and test coverage
+
+name: 'SonarQube Cloud Analysis'
+
+on:
+  workflow_dispatch:
+  merge_group:
+    types: [checks_requested]
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/sonarqube-analysis.yml
+      - interfaces/portal/**
+      - services/121-service/**
+      - services/mock-service/**
+      - '!**.md'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  SONAR_ORGANIZATION: ${{ secrets.SONAR_ORGANIZATION }}
+  SONAR_PROJECT_KEY: ${{ secrets.SONAR_PROJECT_KEY }}
+
+jobs:
+  sonarqube-analysis:
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        node-version: [20.x]
+
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_DB: 121-service
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0  # Full history needed for SonarQube
+
+      # ===== Backend (121-service) Coverage =====
+      - name: Set up Node.js for Backend
+        uses: actions/setup-node@v6
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: 'npm'
+          cache-dependency-path: services/121-service/package-lock.json
+
+      - name: Install Backend Dependencies
+        working-directory: services/121-service
+        run: npm ci
+
+      - name: Run Backend Unit Tests with Coverage
+        working-directory: services/121-service
+        env:
+          NODE_ENV: test
+        run: npm run test:unit:coverage
+
+      - name: Run Backend Integration Tests with Coverage
+        working-directory: services/121-service
+        env:
+          NODE_ENV: test
+          DB_HOST: localhost
+          DB_PORT: 5432
+          DB_USERNAME: postgres
+          DB_PASSWORD: postgres
+          DB_NAME: 121-service
+        run: npm run coverage:report:integration
+
+      - name: Merge Backend Coverage Reports
+        working-directory: services/121-service
+        run: npm run coverage:report:combined
+
+      # ===== Frontend (Portal) Coverage =====
+      - name: Set up Node.js for Frontend
+        uses: actions/setup-node@v6
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: 'npm'
+          cache-dependency-path: interfaces/portal/package-lock.json
+
+      - name: Install Frontend Dependencies
+        working-directory: interfaces/portal
+        run: npm ci
+
+      - name: Run Frontend Tests with Coverage
+        working-directory: interfaces/portal
+        run: npm run test:coverage
+
+      # ===== Mock Service Coverage (Optional) =====
+      - name: Set up Node.js for Mock Service
+        uses: actions/setup-node@v6
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: 'npm'
+          cache-dependency-path: services/mock-service/package-lock.json
+
+      - name: Install Mock Service Dependencies
+        working-directory: services/mock-service
+        run: npm ci
+
+      - name: Check if Mock Service has tests
+        id: check-mock-tests
+        working-directory: services/mock-service
+        run: |
+          if grep -q '"test"' package.json; then
+            echo "has-tests=true" >> $GITHUB_OUTPUT
+          else
+            echo "has-tests=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Run Mock Service Tests with Coverage
+        if: steps.check-mock-tests.outputs.has-tests == 'true'
+        working-directory: services/mock-service
+        run: npm run test:coverage
+        continue-on-error: true
+
+      # ===== Prepare Coverage Files =====
+      - name: Create Combined Coverage Directory
+        run: |
+          mkdir -p combined-coverage
+
+          # Copy backend combined coverage
+          if [ -f "services/121-service/coverage/combined/lcov.info" ]; then
+            cp services/121-service/coverage/combined/lcov.info combined-coverage/backend-lcov.info
+          fi
+
+          # Copy frontend coverage
+          if [ -f "interfaces/portal/coverage/portal/lcov.info" ]; then
+            cp interfaces/portal/coverage/portal/lcov.info combined-coverage/frontend-lcov.info
+          fi
+
+      - name: Display Coverage Files
+        run: |
+          echo "Coverage files found:"
+          find combined-coverage -type f -name "*.info" | head -20
+
+          echo ""
+          echo "Backend coverage stats:"
+          [ -f "combined-coverage/backend-lcov.info" ] && wc -l combined-coverage/backend-lcov.info || echo "Not found"
+
+          echo ""
+          echo "Frontend coverage stats:"
+          [ -f "combined-coverage/frontend-lcov.info" ] && wc -l combined-coverage/frontend-lcov.info || echo "Not found"
+
+      # ===== Run SonarQube Analysis =====
+      - name: SonarQube Scan
+        uses: SonarSource/sonarcloud-github-action@master
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        with:
+          args: >
+            -Dsonar.organization=${{ env.SONAR_ORGANIZATION }}
+            -Dsonar.projectKey=${{ env.SONAR_PROJECT_KEY }}
+            -Dsonar.sources=services/121-service/src,interfaces/portal/src,services/mock-service/src
+            -Dsonar.exclusions=**/*.spec.ts,**/*.test.ts,**/node_modules/**,**/dist/**,**/coverage/**
+            -Dsonar.tests=services/121-service/src,interfaces/portal/src
+            -Dsonar.test.inclusions=**/*.spec.ts,**/*.test.ts
+            -Dsonar.typescript.lcov.reportPaths=combined-coverage/backend-lcov.info,combined-coverage/frontend-lcov.info
+            -Dsonar.sourceEncoding=UTF-8
+
+      # ===== Upload Coverage Reports (Optional - for analysis) =====
+      - name: Upload Coverage Reports
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: coverage-reports
+          path: |
+            services/121-service/coverage/
+            interfaces/portal/coverage/
+            combined-coverage/
+          retention-days: 7
+
+      - name: Comment PR with SonarQube Results
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const backendCoverage = require('fs').existsSync('./services/121-service/coverage/combined/coverage-summary.json');
+            const frontendCoverage = require('fs').existsSync('./interfaces/portal/coverage/coverage-summary.json');
+
+            let comment = '## 📊 SonarQube Analysis\n\n';
+            comment += `**Status:** Analysis in progress on [SonarQube Cloud](https://sonarcloud.io/dashboard?id=${{ env.SONAR_PROJECT_KEY }})\n\n`;
+            comment += '### Coverage Files\n';
+            comment += backendCoverage ? '✅ Backend coverage generated\n' : '❌ Backend coverage not found\n';
+            comment += frontendCoverage ? '✅ Frontend coverage generated\n' : '❌ Frontend coverage not found\n';
+
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: comment
+            });
+        continue-on-error: true
