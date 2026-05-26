@@ -206,7 +206,7 @@ jobs:
           head -20 coverage/frontend-coverage-report/portal/lcov.info | grep '^SF:' | head -5 || true
 
       - name: SonarQube Scan (CI mode)
-        if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_ci_sonar_analysis == 'true' }}
+        if: ${{ github.event_name != 'workflow_dispatch' || inputs.run_ci_sonar_analysis == 'true' }}
         uses: SonarSource/sonarqube-scan-action@c7ee0f9df90b7aa20e8dcf9695dcfe2e7da5b4f2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -216,14 +216,12 @@ jobs:
             -Dsonar.organization=${{ secrets.SONAR_ORGANIZATION }}
             -Dsonar.projectKey=${{ secrets.SONAR_PROJECT_KEY }}
             -Dsonar.javascript.lcov.reportPaths=coverage/**/lcov.info
-            -Dsonar.typescript.lcov.reportPaths=coverage/**/lcov.info
 
       - name: CI scan skipped (Automatic Analysis mode)
-        if: ${{ github.event_name != 'workflow_dispatch' || inputs.run_ci_sonar_analysis != 'true' }}
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_ci_sonar_analysis != 'true' }}
         run: |
-          echo "Skipping Sonar CI scan (manual toggle is false)." >> $GITHUB_STEP_SUMMARY
-          echo "Automatic Analysis mode can stay enabled in SonarCloud." >> $GITHUB_STEP_SUMMARY
-          echo "To import coverage via CI (docs approach), disable Automatic Analysis in SonarCloud and run this workflow manually with run_ci_sonar_analysis=true." >> $GITHUB_STEP_SUMMARY
+          echo "Skipping Sonar CI scan because manual toggle is false." >> $GITHUB_STEP_SUMMARY
+          echo "On push/pull_request events, Sonar CI scan runs automatically." >> $GITHUB_STEP_SUMMARY
 
       - name: Save combined coverage report
         if: always()
